@@ -11,13 +11,22 @@ public class InGameUI : MonoBehaviour
 
     private void Update()
     {
-        if (gameObject.activeSelf)
+        if (!gameObject.activeSelf)
+            return;
+
+        if (testLobbyScript == null)
+            return;
+
+        Lobby lobby = testLobbyScript.GetLobby();
+
+        if (lobby == null)
         {
-            Lobby lobby = testLobbyScript.GetLobby();
-
-            lobbyNameTxt.text = "LobbyName: " + lobby.Name;
-            lobbyCodeTxt.text = "Code: " + lobby.LobbyCode;
+            lobbyNameTxt.text = "LobbyName: -";
+            lobbyCodeTxt.text = "Code: -";
+            return;
         }
-    }
 
+        lobbyNameTxt.text = "LobbyName: " + lobby.Name;
+        lobbyCodeTxt.text = "Code: " + lobby.LobbyCode;
+    }
 }

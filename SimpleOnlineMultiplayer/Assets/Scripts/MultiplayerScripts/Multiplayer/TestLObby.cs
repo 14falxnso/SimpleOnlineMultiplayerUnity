@@ -6,33 +6,31 @@ using Unity.Services.Authentication;
 using Unity.Services.Core;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
-using Unity.Services.Multiplayer;
 using UnityEngine;
-using UnityEngine.Android;
 using UnityEngine.UI;
 
-public class TestLObby : MonoBehaviour
+public class TestLObby : NetworkBehaviour
 {
-
     public Lobby hostLobby;
     public Lobby joinedLobby;
+
     private float heartbeatTimer;
     private float lobbyUpdateTimer;
     private float listLobbiesTimer;
+
     public string playerName;
 
     private const string KEY_START_GAME = "StartGame";
 
     public event EventHandler<OnLobbyListChangedEventArgs> OnLobbyListChanged;
+
     public class OnLobbyListChangedEventArgs : EventArgs
     {
         public List<Lobby> lobbyList;
     }
 
-    [Header("Zelfgemaakt var")]
+    [Header("Zelfgemaakt")]
     [SerializeField] private GameObject inLobbyUI;
-
-    private int maxPlayers = 4;
 
     [SerializeField] private MPUIManager mpUIManager;
     [SerializeField] private TestRelay testRelayScript;
@@ -40,17 +38,42 @@ public class TestLObby : MonoBehaviour
     [SerializeField] private TMP_InputField playerNameInputField;
     [SerializeField] private Button authenticateButton;
 
+    private readonly int maxPlayers = 4;
 
+    private bool isListingLobbies;
+    private bool servicesInitialized = false;
 
-    async void Start()
+    // =========================================================
+    // NETWORK PLAYER DATA
+    // =========================================================
+
+    private NetworkList<PlayerData> playerDataNetworkList =
+        new NetworkList<PlayerData>();
+
+    // =========================================================
+    // START / AWAKE
+    // =========================================================
+
+    private async void Start()
     {
-        await UnityServices.InitializeAsync(); // request naar internet - geen antwoord > geen game
+        // Services worden pas geïnitialiseerd wanneer
+        // de speler op Authenticate drukt.
+        await System.Threading.Tasks.Task.Yield();
+    }
 
-
-        AuthenticationService.Instance.SignedIn += () => {
-            Debug.Log("Signed in " + AuthenticationService.Instance.PlayerId);
-        };
-        await AuthenticationService.Instance.SignInAnonymouslyAsync();
+    private void Awake()
+    {
+        if (authenticateButton != null)
+        {
+            authenticateButton.onClick.AddListener(() =>
+            {
+                Authenticate(
+                    playerNameInputField != null
+                        ? playerNameInputField.text
+                        : "Player"
+                );
+            });
+        }
     }
 
     private void Update()
@@ -60,316 +83,963 @@ public class TestLObby : MonoBehaviour
         HandlePeriodicListLobbies();
     }
 
-    private void Awake()
-    {
-        authenticateButton.onClick.AddListener(() =>
-        {
-            Authenticate(playerNameInputField.text);
-        });
-    }
-    public async void Authenticate (string playerName)
-    {
-        this.playerName = playerName;
-        InitializationOptions options = new InitializationOptions();
-        options.SetProfile(playerName);
+    // =========================================================
+    // AUTHENTICATION
+    // =========================================================
 
-        await UnityServices.InitializeAsync(options);
-
-        AuthenticationService.Instance.SignedIn += () =>
+    public async void Authenticate(string enteredPlayerName)
+    {
+        if (string.IsNullOrWhiteSpace(enteredPlayerName))
         {
+            enteredPlayerName = "Player";
+        }
+
+        playerName = enteredPlayerName;
+
+        try
+        {
+            InitializationOptions options =
+                new InitializationOptions();
+
+            options.SetProfile(playerName);
+
+            if (UnityServices.State ==
+                ServicesInitializationState.Uninitialized)
+            {
+                await UnityServices.InitializeAsync(options);
+                servicesInitialized = true;
+            }
+            else
+            {
+                servicesInitialized =
+                    UnityServices.State ==
+                    ServicesInitializationState.Initialized;
+            }
+
+            if (!AuthenticationService.Instance.IsSignedIn)
+            {
+                AuthenticationService.Instance.SignedIn += () =>
+                {
+                    Debug.Log(
+                        "Signed in: " +
+                        AuthenticationService.Instance.PlayerId
+                    );
+                };
+
+                await AuthenticationService.Instance
+                    .SignInAnonymouslyAsync();
+            }
+
+            Debug.Log(
+                "Authentication successful for: " +
+                playerName
+            );
+
             HandlePeriodicListLobbies();
-        };
-
-        //await AuthenticationService.Instance.SignInAnonymouslyAsync();
+        }
+        catch (Exception e)
+        {
+            Debug.LogError(
+                "Authentication failed: " + e
+            );
+        }
     }
+
+    // =========================================================
+    // NETWORK HOST
+    // =========================================================
+
+    public void StartHost()
+    {
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError(
+                "NetworkManager.Singleton is missing."
+            );
+
+            return;
+        }
+
+        if (NetworkManager.Singleton.IsListening)
+        {
+            Debug.LogWarning(
+                "NetworkManager is already listening."
+            );
+
+            return;
+        }
+
+        NetworkManager.Singleton.OnClientConnectedCallback +=
+            NetworkManager_OnClientConnectedCallback;
+
+        NetworkManager.Singleton.OnClientDisconnectCallback +=
+            NetworkManager_OnClientDisconnectCallback;
+
+        NetworkManager.Singleton.StartHost();
+
+        Debug.Log("Started Host.");
+    }
+
+    private void NetworkManager_OnClientConnectedCallback(
+        ulong clientId)
+    {
+        if (!IsServer)
+            return;
+
+        int existingIndex =
+            GetPlayerIndexFromClientId(clientId);
+
+        if (existingIndex == -1)
+        {
+            playerDataNetworkList.Add(
+                new PlayerData(clientId, "")
+            );
+        }
+
+        Debug.Log(
+            "Client connected: " + clientId
+        );
+    }
+
+    private void NetworkManager_OnClientDisconnectCallback(
+        ulong clientId)
+    {
+        if (!IsServer)
+            return;
+
+        int index =
+            GetPlayerIndexFromClientId(clientId);
+
+        if (index != -1)
+        {
+            playerDataNetworkList.RemoveAt(index);
+        }
+
+        Debug.Log(
+            "Client disconnected: " + clientId
+        );
+    }
+
+    // =========================================================
+    // PLAYER DATA
+    // =========================================================
+
+    private int GetPlayerIndexFromClientId(
+        ulong clientId)
+    {
+        for (int i = 0;
+             i < playerDataNetworkList.Count;
+             i++)
+        {
+            if (playerDataNetworkList[i].clientId ==
+                clientId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    public List<PlayerData> GetPlayerDataList()
+    {
+        List<PlayerData> list =
+            new List<PlayerData>();
+
+        for (int i = 0;
+             i < playerDataNetworkList.Count;
+             i++)
+        {
+            list.Add(
+                playerDataNetworkList[i]
+            );
+        }
+
+        return list;
+    }
+
+    // =========================================================
+    // PLAYER NAME NETWORK SYNC
+    // =========================================================
+
+    [ServerRpc(RequireOwnership = false)]
+    public void SendPlayerNameToServerRpc(
+        string newPlayerName,
+        ServerRpcParams serverRpcParams = default)
+    {
+        ulong clientId =
+            serverRpcParams.Receive.SenderClientId;
+
+        if (string.IsNullOrWhiteSpace(newPlayerName))
+        {
+            newPlayerName = "Player";
+        }
+
+        // -----------------------------------------
+        // Update PlayerData NetworkList
+        // -----------------------------------------
+
+        int playerDataIndex =
+            GetPlayerIndexFromClientId(clientId);
+
+        if (playerDataIndex == -1)
+        {
+            playerDataNetworkList.Add(
+                new PlayerData(
+                    clientId,
+                    newPlayerName
+                )
+            );
+        }
+        else
+        {
+            PlayerData playerData =
+                playerDataNetworkList[
+                    playerDataIndex
+                ];
+
+            playerData.playerName =
+                newPlayerName;
+
+            playerDataNetworkList[
+                playerDataIndex
+            ] = playerData;
+        }
+
+        // -----------------------------------------
+        // Update actual TestPlayer
+        // -----------------------------------------
+
+        SetPlayerNetworkName(
+            clientId,
+            newPlayerName
+        );
+
+        Debug.Log(
+            $"Player name set | " +
+            $"ClientId: {clientId} | " +
+            $"Name: {newPlayerName}"
+        );
+    }
+
+    public void SetPlayerNetworkName(
+        ulong clientId,
+        string newPlayerName)
+    {
+        if (!IsServer)
+            return;
+
+        TestPlayer[] players =
+            FindObjectsByType<TestPlayer>(
+                FindObjectsSortMode.None
+            );
+
+        foreach (TestPlayer player in players)
+        {
+            if (player.OwnerClientId == clientId)
+            {
+                player.SetNetworkName(
+                    newPlayerName
+                );
+
+                Debug.Log(
+                    $"Network name updated for " +
+                    $"ClientId {clientId}: " +
+                    newPlayerName
+                );
+
+                break;
+            }
+        }
+    }
+
+    // =========================================================
+    // LOBBY HEARTBEAT
+    // =========================================================
+
+    private async void HandleLobbyHeartbeat()
+    {
+        if (hostLobby == null)
+            return;
+
+        heartbeatTimer -= Time.deltaTime;
+
+        if (heartbeatTimer <= 0f)
+        {
+            heartbeatTimer = 15f;
+
+            try
+            {
+                await LobbyService.Instance
+                    .SendHeartbeatPingAsync(
+                        hostLobby.Id
+                    );
+            }
+            catch (LobbyServiceException e)
+            {
+                Debug.LogError(
+                    "Heartbeat failed: " + e
+                );
+            }
+        }
+    }
+
+    // =========================================================
+    // LOBBY POLLING
+    // =========================================================
+
+    private async void HandleLobbyPollForUpdate()
+    {
+        if (joinedLobby == null)
+            return;
+
+        lobbyUpdateTimer -= Time.deltaTime;
+
+        if (lobbyUpdateTimer <= 0f)
+        {
+            lobbyUpdateTimer = 1.1f;
+
+            try
+            {
+                joinedLobby =
+                    await LobbyService.Instance
+                        .GetLobbyAsync(
+                            joinedLobby.Id
+                        );
+
+                if (joinedLobby.Data.ContainsKey(
+                    KEY_START_GAME))
+                {
+                    string relayCode =
+                        joinedLobby.Data[
+                            KEY_START_GAME
+                        ].Value;
+
+                    if (relayCode != "0")
+                    {
+                        await testRelayScript
+                            .JoinRelay(relayCode);
+
+                        joinedLobby = null;
+                    }
+                }
+            }
+            catch (LobbyServiceException e)
+            {
+                Debug.LogError(
+                    "Lobby update failed: " + e
+                );
+            }
+        }
+    }
+
+    // =========================================================
+    // LOBBY LIST
+    // =========================================================
 
     private void HandlePeriodicListLobbies()
-{
-    if (joinedLobby == null && AuthenticationService.Instance.IsSignedIn)
     {
+        if (joinedLobby != null)
+            return;
+
+        if (!AuthenticationService.Instance.IsSignedIn)
+            return;
+
         listLobbiesTimer -= Time.deltaTime;
 
         if (listLobbiesTimer <= 0f)
         {
             listLobbiesTimer = 3f;
+
             ListLobbies();
         }
-    }
-}
-
-    public async void HandleLobbyHeartbeat()
-    {
-        if (hostLobby != null)
-        {
-            heartbeatTimer -= Time.deltaTime;
-            if(heartbeatTimer < 0f)
-            {
-                float heartBeatTimerMax = 15;
-                    heartbeatTimer = heartBeatTimerMax;
-
-                await LobbyService.Instance.SendHeartbeatPingAsync(hostLobby.Id); // timer voor de lobby
-            }
-
-        }
-    }
-
-    public async void HandleLobbyPollForUpdate()
-    {
-        if (joinedLobby != null)
-        {
-            lobbyUpdateTimer -= Time.deltaTime;
-            if (lobbyUpdateTimer < 0f)
-            {
-                float lobbyUpdateTimerMax = 1.1f;
-                lobbyUpdateTimer = lobbyUpdateTimerMax;
-
-                joinedLobby = await LobbyService.Instance.GetLobbyAsync(joinedLobby.Id); // timer voor de lobby
-
-                if (joinedLobby.Data[KEY_START_GAME].Value != "0")
-                {
-                    string relayCode =
-                        joinedLobby.Data[KEY_START_GAME].Value;
-
-                    await testRelayScript.JoinRelay(relayCode);
-
-                    joinedLobby = null;
-                }
-            }
-
-        }
-    }
-
-    public async void CreateLobby(string lobbyName, bool isPrivate)
-    {
-        Player player = GetPlayer();
-        CreateLobbyOptions options = new CreateLobbyOptions
-        {
-            //Player = player,
-            IsPrivate = isPrivate,
-            Data = new Dictionary<string, DataObject>
-            {
-                {KEY_START_GAME, new DataObject(DataObject.VisibilityOptions.Member, "0")}
-            }
-        };
-
-
-            Lobby lobby = await LobbyService.Instance.CreateLobbyAsync(
-                lobbyName,
-                maxPlayers,
-                options
-            );
-
-        hostLobby = lobby;
-        joinedLobby = lobby;
-
-        mpUIManager.InLobbyUIOnOff();
-
     }
 
     public async void ListLobbies()
     {
+        if (isListingLobbies)
+            return;
+
+        if (!AuthenticationService.Instance.IsSignedIn)
+            return;
+
+        isListingLobbies = true;
+
         try
         {
-            QueryLobbiesOptions queryLobbiesOptions = new QueryLobbiesOptions
-            {
-                Filters = new List<QueryFilter> {
-                new QueryFilter(QueryFilter.FieldOptions.AvailableSlots, "0", QueryFilter.OpOptions.GT)
-             
+            QueryLobbiesOptions queryLobbiesOptions =
+                new QueryLobbiesOptions
+                {
+                    Filters = new List<QueryFilter>
+                    {
+                        new QueryFilter(
+                            QueryFilter.FieldOptions
+                                .AvailableSlots,
+                            "0",
+                            QueryFilter.OpOptions.GT
+                        )
+                    }
+                };
+
+            QueryResponse queryResponse =
+                await LobbyService.Instance
+                    .QueryLobbiesAsync(
+                        queryLobbiesOptions
+                    );
+
+            OnLobbyListChanged?.Invoke(
+                this,
+                new OnLobbyListChangedEventArgs
+                {
+                    lobbyList =
+                        queryResponse.Results
                 }
-            };
-            
-
-            QueryResponse queryReponse = await LobbyService.Instance.QueryLobbiesAsync(queryLobbiesOptions);
-
-            OnLobbyListChanged?.Invoke(this, new OnLobbyListChangedEventArgs {
-            lobbyList = queryReponse.Results});
+            );
         }
         catch (LobbyServiceException e)
         {
-            Debug.Log(e);
+            Debug.LogError(
+                "List lobbies failed: " + e
+            );
+        }
+        finally
+        {
+            isListingLobbies = false;
         }
     }
 
-    public async void JoinLobbyById(string lobbyId)
+    // =========================================================
+    // CREATE LOBBY
+    // =========================================================
+
+    public async void CreateLobby(
+        string lobbyName,
+        bool isPrivate)
     {
-            Lobby lobby = await LobbyService.Instance.JoinLobbyByIdAsync(lobbyId); // join de lobby
+        try
+        {
+            Player player = GetPlayer();
+
+            CreateLobbyOptions options =
+                new CreateLobbyOptions
+                {
+                    Player = player,
+                    IsPrivate = isPrivate,
+
+                    Data =
+                        new Dictionary<string, DataObject>
+                        {
+                            {
+                                KEY_START_GAME,
+                                new DataObject(
+                                    DataObject.VisibilityOptions
+                                        .Member,
+                                    "0"
+                                )
+                            }
+                        }
+                };
+
+            Lobby lobby =
+                await LobbyService.Instance
+                    .CreateLobbyAsync(
+                        lobbyName,
+                        maxPlayers,
+                        options
+                    );
+
+            hostLobby = lobby;
             joinedLobby = lobby;
 
-            mpUIManager.InLobbyUIOnOff();
+            if (mpUIManager != null)
+            {
+                mpUIManager.InLobbyUIOnOff();
+            }
+
+            Debug.Log(
+                "Created lobby: " + lobby.Id
+            );
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError(
+                "Create lobby failed: " + e
+            );
+        }
     }
-    public async void JoinLobbyByCode(string lobbyCode)
+
+    // =========================================================
+    // JOIN LOBBY
+    // =========================================================
+
+    public async void JoinLobbyById(
+        string lobbyId)
     {
-            Lobby lobby = await LobbyService.Instance.JoinLobbyByCodeAsync(lobbyCode); // join de lobby
+        try
+        {
+            Lobby lobby =
+                await LobbyService.Instance
+                    .JoinLobbyByIdAsync(
+                        lobbyId
+                    );
+
             joinedLobby = lobby;
 
-            mpUIManager.InLobbyUIOnOff();
+            if (mpUIManager != null)
+            {
+                mpUIManager.InLobbyUIOnOff();
+            }
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError(
+                "Join lobby by ID failed: " + e
+            );
+        }
+    }
+
+    public async void JoinLobbyByCode(
+        string lobbyCode)
+    {
+        try
+        {
+            Lobby lobby =
+                await LobbyService.Instance
+                    .JoinLobbyByCodeAsync(
+                        lobbyCode
+                    );
+
+            joinedLobby = lobby;
+
+            if (mpUIManager != null)
+            {
+                mpUIManager.InLobbyUIOnOff();
+            }
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError(
+                "Join lobby by code failed: " + e
+            );
+        }
     }
 
     public async void JoinLobby(Lobby lobby)
     {
-        Player player = GetPlayer();
+        if (lobby == null)
+            return;
 
-        joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(lobby.Id, new JoinLobbyByIdOptions
+        try
         {
-            Player = player
-        }); // join de lobby
-        
+            Player player = GetPlayer();
 
-        mpUIManager.InLobbyUIOnOff();
+            joinedLobby =
+                await LobbyService.Instance
+                    .JoinLobbyByIdAsync(
+                        lobby.Id,
+                        new JoinLobbyByIdOptions
+                        {
+                            Player = player
+                        }
+                    );
+
+            if (mpUIManager != null)
+            {
+                mpUIManager.InLobbyUIOnOff();
+            }
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError(
+                "Join lobby failed: " + e
+            );
+        }
     }
 
     public async void QuickJoinLobby()
     {
         try
         {
-            await LobbyService.Instance.QuickJoinLobbyAsync();
+            joinedLobby =
+                await LobbyService.Instance
+                    .QuickJoinLobbyAsync(
+                        new QuickJoinLobbyOptions
+                        {
+                            Player = GetPlayer()
+                        }
+                    );
 
-            mpUIManager.InLobbyUIOnOff();
+            if (mpUIManager != null)
+            {
+                mpUIManager.InLobbyUIOnOff();
+            }
         }
         catch (LobbyServiceException e)
         {
-            Debug.Log(e);
+            Debug.LogError(
+                "Quick Join failed: " + e
+            );
         }
     }
+
+    // =========================================================
+    // PLAYER
+    // =========================================================
 
     public Player GetPlayer()
     {
-        return new Player // geef de player
+        return new Player
         {
-            Data = new Dictionary<string, PlayerDataObject>
+            Data =
+                new Dictionary<string,
+                    PlayerDataObject>
+                {
                     {
-                        {"Playername", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, playerName) }
+                        "PlayerName",
+                        new PlayerDataObject(
+                            PlayerDataObject
+                                .VisibilityOptions.Member,
+                            playerName
+                        )
                     }
+                }
         };
     }
 
-    public async void UpdateLobbyGameMode(string gameMode)
+    public async void UpdatePlayerName(
+        string newPlayerName)
     {
+        if (string.IsNullOrWhiteSpace(
+            newPlayerName))
+        {
+            newPlayerName = "Player";
+        }
+
+        playerName = newPlayerName;
+
+        if (joinedLobby == null)
+            return;
+
         try
         {
-
-
-            hostLobby = await LobbyService.Instance.UpdateLobbyAsync(hostLobby.Id, new UpdateLobbyOptions
-            {
-                Data = new Dictionary<string, DataObject> {
-                    { "GameMode", new DataObject(DataObject.VisibilityOptions.Public, gameMode) } 
-                }
-            });
-            joinedLobby = hostLobby;
-        }catch (LobbyServiceException e)
+            await LobbyService.Instance
+                .UpdatePlayerAsync(
+                    joinedLobby.Id,
+                    AuthenticationService.Instance
+                        .PlayerId,
+                    new UpdatePlayerOptions
+                    {
+                        Data =
+                            new Dictionary<
+                                string,
+                                PlayerDataObject>
+                            {
+                                {
+                                    "PlayerName",
+                                    new PlayerDataObject(
+                                        PlayerDataObject
+                                            .VisibilityOptions
+                                            .Member,
+                                        playerName
+                                    )
+                                }
+                            }
+                    }
+                );
+        }
+        catch (LobbyServiceException e)
         {
-            Debug.Log(e);
+            Debug.LogError(
+                "Update player name failed: " + e
+            );
         }
     }
 
+    // =========================================================
+    // GAME MODE
+    // =========================================================
 
-    public async void UpdatePlayerName(string newPlayername)
+    public async void UpdateLobbyGameMode(
+        string gameMode)
     {
+        if (hostLobby == null)
+            return;
 
-            playerName = newPlayername;
-            await LobbyService.Instance.UpdatePlayerAsync(joinedLobby.Id,
-            AuthenticationService.Instance.PlayerId,
-            new UpdatePlayerOptions
-            {
-                Data = new Dictionary<string, PlayerDataObject>{
-                    {"PlayerName", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, playerName) }
-                }
-            });
+        try
+        {
+            hostLobby =
+                await LobbyService.Instance
+                    .UpdateLobbyAsync(
+                        hostLobby.Id,
+                        new UpdateLobbyOptions
+                        {
+                            Data =
+                                new Dictionary<
+                                    string,
+                                    DataObject>
+                                {
+                                    {
+                                        "GameMode",
+                                        new DataObject(
+                                            DataObject
+                                                .VisibilityOptions
+                                                .Public,
+                                            gameMode
+                                        )
+                                    }
+                                }
+                        }
+                    );
+
+            joinedLobby = hostLobby;
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError(
+                "Update game mode failed: " + e
+            );
+        }
     }
 
+    // =========================================================
+    // START GAME
+    // =========================================================
+
+    public async void StartGame()
+    {
+        if (joinedLobby == null)
+            return;
+
+        if (testRelayScript == null)
+        {
+            Debug.LogError(
+                "TestRelay script is missing."
+            );
+
+            return;
+        }
+
+        try
+        {
+            string relayCode =
+                await testRelayScript.CreateRelay();
+
+            if (string.IsNullOrEmpty(relayCode))
+            {
+                Debug.LogError(
+                    "Relay code was null."
+                );
+
+                return;
+            }
+
+            Lobby lobby =
+                await LobbyService.Instance
+                    .UpdateLobbyAsync(
+                        joinedLobby.Id,
+                        new UpdateLobbyOptions
+                        {
+                            Data =
+                                new Dictionary<
+                                    string,
+                                    DataObject>
+                                {
+                                    {
+                                        KEY_START_GAME,
+                                        new DataObject(
+                                            DataObject
+                                                .VisibilityOptions
+                                                .Member,
+                                            relayCode
+                                        )
+                                    }
+                                }
+                        }
+                    );
+
+            joinedLobby = lobby;
+
+            if (inLobbyUI != null)
+            {
+                inLobbyUI.SetActive(false);
+            }
+
+            Debug.Log(
+                "Game started. Relay code: " +
+                relayCode
+            );
+        }
+        catch (LobbyServiceException e)
+        {
+            Debug.LogError(
+                "Start game failed: " + e
+            );
+        }
+    }
+
+    // =========================================================
+    // LEAVE LOBBY
+    // =========================================================
 
     public async void LeaveLobby()
     {
         try
         {
-            testRelayScript.LeaveRelay();
+            if (testRelayScript != null)
+            {
+                testRelayScript.LeaveRelay();
+            }
 
             if (joinedLobby != null)
             {
-                await LobbyService.Instance.RemovePlayerAsync(
-                    joinedLobby.Id,
-                    AuthenticationService.Instance.PlayerId
-                );
+                await LobbyService.Instance
+                    .RemovePlayerAsync(
+                        joinedLobby.Id,
+                        AuthenticationService.Instance
+                            .PlayerId
+                    );
             }
 
             joinedLobby = null;
             hostLobby = null;
-
         }
         catch (LobbyServiceException e)
         {
-            Debug.LogError(e);
+            Debug.LogError(
+                "Leave lobby failed: " + e
+            );
         }
     }
+
+    // =========================================================
+    // KICK
+    // =========================================================
 
     public async void KickPlayer()
     {
+        if (joinedLobby == null)
+            return;
+
+        if (joinedLobby.Players.Count < 2)
+            return;
+
         try
         {
-            await LobbyService.Instance.RemovePlayerAsync(joinedLobby.Id, joinedLobby.Players[1].Id);
+            await LobbyService.Instance
+                .RemovePlayerAsync(
+                    joinedLobby.Id,
+                    joinedLobby.Players[1].Id
+                );
         }
         catch (LobbyServiceException e)
         {
-            Debug.Log(e);
+            Debug.LogError(
+                "Kick failed: " + e
+            );
         }
     }
 
+    // =========================================================
+    // HOST MIGRATION
+    // =========================================================
 
     public async void MigrateLobbyHost()
     {
+        if (joinedLobby == null)
+            return;
+
+        if (joinedLobby.Players.Count < 2)
+            return;
+
         try
         {
-            hostLobby = await LobbyService.Instance.UpdateLobbyAsync(hostLobby.Id, new UpdateLobbyOptions
-            {
-                HostId = joinedLobby.Players[1].Id
-            });
+            string newHostId =
+                joinedLobby.Players[1].Id;
+
+            hostLobby =
+                await LobbyService.Instance
+                    .UpdateLobbyAsync(
+                        joinedLobby.Id,
+                        new UpdateLobbyOptions
+                        {
+                            HostId = newHostId
+                        }
+                    );
+
             joinedLobby = hostLobby;
         }
         catch (LobbyServiceException e)
         {
-            Debug.Log(e);
+            Debug.LogError(
+                "Host migration failed: " + e
+            );
         }
     }
+
+    // =========================================================
+    // DELETE LOBBY
+    // =========================================================
 
     public async void DeleteLobby()
     {
+        if (joinedLobby == null)
+            return;
+
         try
         {
-            testRelayScript.LeaveRelay();
+            if (testRelayScript != null)
+            {
+                testRelayScript.LeaveRelay();
+            }
 
-            await LobbyService.Instance.DeleteLobbyAsync(joinedLobby.Id);
+            await LobbyService.Instance
+                .DeleteLobbyAsync(
+                    joinedLobby.Id
+                );
 
             joinedLobby = null;
             hostLobby = null;
-            Debug.Log("deleted");
-            mpUIManager.InLobbyUIOnOff();
-            mpUIManager.LobbyUIOnOff();
+
+            if (mpUIManager != null)
+            {
+                mpUIManager.InLobbyUIOnOff();
+                mpUIManager.LobbyUIOnOff();
+            }
+
+            Debug.Log("Lobby deleted.");
         }
         catch (LobbyServiceException e)
         {
-            Debug.LogError(e);
+            Debug.LogError(
+                "Delete lobby failed: " + e
+            );
         }
     }
 
-    public async void StartGame()
-    {
-
-            string relaycode = await testRelayScript.CreateRelay();
-
-        Lobby lobby = await LobbyService.Instance.UpdateLobbyAsync(joinedLobby.Id, new UpdateLobbyOptions
-        {
-            Data = new Dictionary<string, DataObject>
-            {
-                { KEY_START_GAME , new DataObject(DataObject.VisibilityOptions.Member, relaycode)}
-            }
-        });
-
-            joinedLobby = lobby;
-        inLobbyUI.SetActive(false);
-    }
+    // =========================================================
+    // GET LOBBY
+    // =========================================================
 
     public Lobby GetLobby()
     {
         return joinedLobby;
+    }
+
+    // =========================================================
+    // CLEANUP
+    // =========================================================
+
+    private void OnDestroy()
+    {
+        if (NetworkManager.Singleton == null)
+            return;
+
+        NetworkManager.Singleton
+            .OnClientConnectedCallback -=
+            NetworkManager_OnClientConnectedCallback;
+
+        NetworkManager.Singleton
+            .OnClientDisconnectCallback -=
+            NetworkManager_OnClientDisconnectCallback;
     }
 }

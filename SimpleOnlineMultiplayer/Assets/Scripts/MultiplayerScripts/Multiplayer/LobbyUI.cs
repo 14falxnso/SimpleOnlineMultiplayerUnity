@@ -1,6 +1,4 @@
 using System.Collections.Generic;
-using System.Security.Cryptography;
-using NUnit.Framework;
 using TMPro;
 using Unity.Services.Lobbies.Models;
 using UnityEngine;
@@ -21,54 +19,84 @@ public class LobbyUI : MonoBehaviour
     [SerializeField] private Transform lobbyContainer;
     [SerializeField] private Transform lobbyTemplate;
 
-
     private void Awake()
     {
         mainMenuButton.onClick.AddListener(() =>
         {
-            // stuurt naar mainmenuscene?
+            // Stuurt naar main menu
         });
+
         createLobbyButton.onClick.AddListener(() =>
         {
             lobbyCreateUI.gameObject.SetActive(true);
         });
+
         quickJoinButton.onClick.AddListener(() =>
         {
             testLobbyScript.QuickJoinLobby();
         });
+
         joinLobbyButton.onClick.AddListener(() =>
         {
-            testLobbyScript.JoinLobbyByCode(testLobbyScript.joinedLobby.Id);
-            gameObject.SetActive(false);
+            testLobbyScript.JoinLobbyByCode(joinCodeInputField.text);
         });
+
         lobbyTemplate.gameObject.SetActive(false);
     }
 
-
     private void Start()
     {
-
         testLobbyScript.OnLobbyListChanged += TestLobbyScript_OnLobbyListChanged;
+
         UpdateLobbyList(new List<Lobby>());
     }
 
-    private void TestLobbyScript_OnLobbyListChanged(object sendert, TestLObby.OnLobbyListChangedEventArgs e)
+    private void TestLobbyScript_OnLobbyListChanged(
+        object sender,
+        TestLObby.OnLobbyListChangedEventArgs e)
     {
         UpdateLobbyList(e.lobbyList);
     }
 
     private void UpdateLobbyList(List<Lobby> lobbyList)
     {
-        foreach (Transform child in lobbyContainer){
-            if (child == lobbyTemplate) continue;
+        foreach (Transform child in lobbyContainer)
+        {
+            if (child == lobbyTemplate)
+                continue;
+
             Destroy(child.gameObject);
         }
 
-        foreach (Lobby lobby in lobbyList) {
-            Transform lobbyTransform = Instantiate(lobbyTemplate,lobbyContainer);
-            lobbyTransform.gameObject.SetActive(true); 
-            lobbyTransform.GetComponent<LobbyListSingleUI>().SetLobby(lobby);
+        foreach (Lobby lobby in lobbyList)
+        {
+            Transform lobbyTransform =
+                Instantiate(lobbyTemplate, lobbyContainer);
+
+            lobbyTransform.gameObject.SetActive(true);
+
+            LobbyListSingleUI lobbyListSingleUI =
+                lobbyTransform.GetComponent<LobbyListSingleUI>();
+
+            if (lobbyListSingleUI == null)
+            {
+                Debug.LogError(
+                    "LobbyListSingleUI ontbreekt op het lobbyTemplate!"
+                );
+
+                continue;
+            }
+
+            lobbyListSingleUI.SetLobby(lobby);
         }
     }
 
+    private void OnDestroy()
+    {
+        if (testLobbyScript != null)
+        {
+            testLobbyScript.OnLobbyListChanged -=
+                TestLobbyScript_OnLobbyListChanged;
+        }
+    }
 }
