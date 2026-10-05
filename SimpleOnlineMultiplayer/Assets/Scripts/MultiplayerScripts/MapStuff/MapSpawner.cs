@@ -1,10 +1,11 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using TMPro;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.UI;
 
-public class MapSpawner : MonoBehaviour
+public class MapSpawner : NetworkBehaviour
 {
     [SerializeField] private List<GameObject> mapList;
     private GameObject selectedMap;
@@ -33,6 +34,13 @@ public class MapSpawner : MonoBehaviour
         if (mapChoice == "SoccerField")
         {
             selectedMap = mapList[2];
+        }
+
+        if (IsServer)
+        {
+            Vector3 spawnMapPos = Vector3.zero;
+
+            Instantiate(selectedMap, spawnMapPos, Quaternion.identity);
         }
     }
 }
