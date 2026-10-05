@@ -3712,6 +3712,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f163c8d3598fa9743a559eea63a5ffa5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MapSpawner
+  ShowTopMostFoldoutHeaderGroup: 1
   mapList:
   - {fileID: 5111076606382202099, guid: 04f060b93dcfedc448143db389bec1f0, type: 3}
   - {fileID: 8003515819032564276, guid: dac4555b199941645bf5eba5ea23dedf, type: 3}
