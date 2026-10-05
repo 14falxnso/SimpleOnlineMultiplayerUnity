@@ -10,10 +10,10 @@ public class MPUIManager : MonoBehaviour
     [SerializeField] private GameObject inLobbyUI; // in de lobby
     [SerializeField] private GameObject inGameUI; // in de game ui
 
-    private void Start()
-    {
-        authenticateUI.SetActive(true);
-    }
+    //private void Start()
+    //{
+    //    authenticateUI.SetActive(true);
+    //}
 
     public void AuthenticateUIOnOff()
     {

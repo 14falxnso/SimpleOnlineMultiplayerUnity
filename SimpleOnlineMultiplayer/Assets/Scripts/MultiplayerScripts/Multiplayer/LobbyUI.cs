@@ -6,6 +6,7 @@ using UnityEngine.UI;
 
 public class LobbyUI : MonoBehaviour
 {
+    [Header("Lobby")]
     [SerializeField] private TestLObby testLobbyScript;
 
     [SerializeField] private Button mainMenuButton;
@@ -14,52 +15,243 @@ public class LobbyUI : MonoBehaviour
     [SerializeField] private Button joinLobbyButton;
     [SerializeField] private TMP_InputField joinCodeInputField;
 
+    [Header("Multiplayer Name")]
+    [SerializeField] private TMP_InputField playerNameInputField;
+    [SerializeField] private Button savePlayerNameButton;
+    [SerializeField] private TextMeshProUGUI playerNameMessageText;
+
+    [Header("Lobby Create")]
     [SerializeField] private LobbyCreateUI lobbyCreateUI;
 
+    [Header("Lobby List")]
     [SerializeField] private Transform lobbyContainer;
     [SerializeField] private Transform lobbyTemplate;
 
     private void Awake()
     {
-        mainMenuButton.onClick.AddListener(() =>
-        {
-            // Stuurt naar main menu
-        });
+        /*
+         * Deze buttons worden automatisch gekoppeld.
+         * Je hoeft dus niets in Button -> OnClick() te zetten.
+         */
 
-        createLobbyButton.onClick.AddListener(() =>
+        if (mainMenuButton != null)
         {
-            lobbyCreateUI.gameObject.SetActive(true);
-        });
+            mainMenuButton.onClick.AddListener(() =>
+            {
+                // Stuurt naar main menu
+            });
+        }
 
-        quickJoinButton.onClick.AddListener(() =>
+        if (createLobbyButton != null)
         {
-            testLobbyScript.QuickJoinLobby();
-        });
+            createLobbyButton.onClick.AddListener(() =>
+            {
+                if (lobbyCreateUI != null)
+                {
+                    lobbyCreateUI.gameObject.SetActive(true);
+                }
+            });
+        }
 
-        joinLobbyButton.onClick.AddListener(() =>
+        if (quickJoinButton != null)
         {
-            testLobbyScript.JoinLobbyByCode(joinCodeInputField.text);
-        });
+            quickJoinButton.onClick.AddListener(() =>
+            {
+                SavePlayerName();
 
-        lobbyTemplate.gameObject.SetActive(false);
+                testLobbyScript.QuickJoinLobby();
+            });
+        }
+
+        if (joinLobbyButton != null)
+        {
+            joinLobbyButton.onClick.AddListener(() =>
+            {
+                SavePlayerName();
+
+                testLobbyScript.JoinLobbyByCode(
+                    joinCodeInputField.text
+                );
+            });
+        }
+
+        if (savePlayerNameButton != null)
+        {
+            savePlayerNameButton.onClick.AddListener(
+                SavePlayerName
+            );
+        }
+
+        if (lobbyTemplate != null)
+        {
+            lobbyTemplate.gameObject.SetActive(false);
+        }
     }
 
     private void Start()
     {
-        testLobbyScript.OnLobbyListChanged += TestLobbyScript_OnLobbyListChanged;
+        if (testLobbyScript != null)
+        {
+            testLobbyScript.OnLobbyListChanged +=
+                TestLobbyScript_OnLobbyListChanged;
+        }
 
-        UpdateLobbyList(new List<Lobby>());
+        LoadPlayerName();
+
+        UpdateLobbyList(
+            new List<Lobby>()
+        );
     }
+
+    // =========================================================
+    // PLAYER NAME LADEN
+    // =========================================================
+
+    private void LoadPlayerName()
+    {
+        if (testLobbyScript == null)
+            return;
+
+        string currentName =
+            testLobbyScript.playerName;
+
+        /*
+         * Als TestLObby nog geen naam heeft,
+         * kijken we naar het lokale account.
+         */
+
+        if (string.IsNullOrWhiteSpace(currentName))
+        {
+            if (AccountManager.Instance != null &&
+                AccountManager.Instance.CurrentAccount != null)
+            {
+                currentName =
+                    AccountManager.Instance
+                        .CurrentAccount
+                        .stats
+                        .lastUsedName;
+            }
+        }
+
+        /*
+         * Als er nog helemaal geen naam is,
+         * gebruiken we Player.
+         */
+
+        if (string.IsNullOrWhiteSpace(currentName))
+        {
+            currentName = "Player";
+        }
+
+        if (playerNameInputField != null)
+        {
+            playerNameInputField.text =
+                currentName;
+        }
+    }
+
+    // =========================================================
+    // PLAYER NAME OPSLAAN
+    // =========================================================
+
+    private void SavePlayerName()
+    {
+        if (testLobbyScript == null)
+            return;
+
+        if (playerNameInputField == null)
+            return;
+
+        string newName =
+            playerNameInputField.text.Trim();
+
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            ShowPlayerNameMessage(
+                "Vul een multiplayernaam in."
+            );
+
+            return;
+        }
+
+        if (newName.Length < 3)
+        {
+            ShowPlayerNameMessage(
+                "Naam moet minimaal 3 tekens zijn."
+            );
+
+            return;
+        }
+
+        if (newName.Length > 20)
+        {
+            ShowPlayerNameMessage(
+                "Naam mag maximaal 20 tekens zijn."
+            );
+
+            return;
+        }
+
+        /*
+         * Naam naar TestLObby sturen.
+         */
+
+        testLobbyScript.SetPlayerName(
+            newName
+        );
+
+        /*
+         * Naam lokaal opslaan bij het account.
+         */
+
+        if (AccountManager.Instance != null &&
+            AccountManager.Instance.CurrentAccount != null)
+        {
+            AccountManager.Instance
+                .CurrentAccount
+                .stats
+                .lastUsedName = newName;
+
+            AccountManager.Instance.SaveCurrentAccount();
+        }
+
+        ShowPlayerNameMessage(
+            "Naam opgeslagen!"
+        );
+    }
+
+    private void ShowPlayerNameMessage(
+        string message)
+    {
+        if (playerNameMessageText != null)
+        {
+            playerNameMessageText.text =
+                message;
+        }
+    }
+
+    // =========================================================
+    // LOBBY LIST
+    // =========================================================
 
     private void TestLobbyScript_OnLobbyListChanged(
         object sender,
         TestLObby.OnLobbyListChangedEventArgs e)
     {
-        UpdateLobbyList(e.lobbyList);
+        UpdateLobbyList(
+            e.lobbyList
+        );
     }
 
-    private void UpdateLobbyList(List<Lobby> lobbyList)
+    private void UpdateLobbyList(
+        List<Lobby> lobbyList)
     {
+        if (lobbyContainer == null ||
+            lobbyTemplate == null)
+        {
+            return;
+        }
+
         foreach (Transform child in lobbyContainer)
         {
             if (child == lobbyTemplate)
@@ -71,12 +263,17 @@ public class LobbyUI : MonoBehaviour
         foreach (Lobby lobby in lobbyList)
         {
             Transform lobbyTransform =
-                Instantiate(lobbyTemplate, lobbyContainer);
+                Instantiate(
+                    lobbyTemplate,
+                    lobbyContainer
+                );
 
             lobbyTransform.gameObject.SetActive(true);
 
             LobbyListSingleUI lobbyListSingleUI =
-                lobbyTransform.GetComponent<LobbyListSingleUI>();
+                lobbyTransform.GetComponent<
+                    LobbyListSingleUI
+                >();
 
             if (lobbyListSingleUI == null)
             {
@@ -87,9 +284,15 @@ public class LobbyUI : MonoBehaviour
                 continue;
             }
 
-            lobbyListSingleUI.SetLobby(lobby);
+            lobbyListSingleUI.SetLobby(
+                lobby
+            );
         }
     }
+
+    // =========================================================
+    // DESTROY
+    // =========================================================
 
     private void OnDestroy()
     {

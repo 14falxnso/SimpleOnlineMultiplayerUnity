@@ -1,12 +1,15 @@
-using UnityEngine;
+using System;
 
-public class PlayerStats : MonoBehaviour
+[Serializable]
+public class PlayerStats
 {
-    [Header("Stats")]
-    public float thrownObjects;
-    public float wins;
-    public float playedGames;
+    public int thrownObjects;
+    public int wins;
+    public int playedGames;
+
     public float lastPlayedGameResult;
     public float playtime;
-    public float lastUsedName;
+
+    // Laatst gebruikte multiplayernaam
+    public string lastUsedName;
 }

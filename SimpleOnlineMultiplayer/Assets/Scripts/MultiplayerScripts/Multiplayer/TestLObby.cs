@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using TMPro;
 using Unity.Netcode;
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using UnityEngine;
-using UnityEngine.UI;
 
 public class TestLObby : NetworkBehaviour
 {
@@ -18,11 +16,17 @@ public class TestLObby : NetworkBehaviour
     private float lobbyUpdateTimer;
     private float listLobbiesTimer;
 
+    // Naam van het lokale account
+    public string accountName;
+
+    // Naam die andere spelers zien
     public string playerName;
 
     private const string KEY_START_GAME = "StartGame";
 
-    public event EventHandler<OnLobbyListChangedEventArgs> OnLobbyListChanged;
+    public event EventHandler<
+        OnLobbyListChangedEventArgs
+    > OnLobbyListChanged;
 
     public class OnLobbyListChangedEventArgs : EventArgs
     {
@@ -35,46 +39,23 @@ public class TestLObby : NetworkBehaviour
     [SerializeField] private MPUIManager mpUIManager;
     [SerializeField] private TestRelay testRelayScript;
 
-    [SerializeField] private TMP_InputField playerNameInputField;
-    [SerializeField] private Button authenticateButton;
-
     private readonly int maxPlayers = 4;
 
     private bool isListingLobbies;
     private bool servicesInitialized = false;
 
-    // =========================================================
-    // NETWORK PLAYER DATA
-    // =========================================================
-
-    private NetworkList<PlayerData> playerDataNetworkList =
+    private NetworkList<PlayerData>
+        playerDataNetworkList =
         new NetworkList<PlayerData>();
-
-    // =========================================================
-    // START / AWAKE
-    // =========================================================
 
     private async void Start()
     {
-        // Services worden pas geïnitialiseerd wanneer
-        // de speler op Authenticate drukt.
         await System.Threading.Tasks.Task.Yield();
     }
 
-    private void Awake()
-    {
-        if (authenticateButton != null)
-        {
-            authenticateButton.onClick.AddListener(() =>
-            {
-                Authenticate(
-                    playerNameInputField != null
-                        ? playerNameInputField.text
-                        : "Player"
-                );
-            });
-        }
-    }
+    // =========================================================
+    // UPDATE
+    // =========================================================
 
     private void Update()
     {
@@ -84,29 +65,53 @@ public class TestLObby : NetworkBehaviour
     }
 
     // =========================================================
-    // AUTHENTICATION
+    // AUTHENTICATE
     // =========================================================
 
-    public async void Authenticate(string enteredPlayerName)
+    public async void Authenticate(
+        string enteredAccountName,
+        string enteredPlayerName)
     {
-        if (string.IsNullOrWhiteSpace(enteredPlayerName))
+        if (string.IsNullOrWhiteSpace(
+            enteredAccountName))
         {
-            enteredPlayerName = "Player";
+            enteredAccountName = "Player";
         }
 
-        playerName = enteredPlayerName;
+        if (string.IsNullOrWhiteSpace(
+            enteredPlayerName))
+        {
+            enteredPlayerName =
+                enteredAccountName;
+        }
+
+        accountName =
+            enteredAccountName;
+
+        playerName =
+            enteredPlayerName;
 
         try
         {
             InitializationOptions options =
                 new InitializationOptions();
 
-            options.SetProfile(playerName);
+            /*
+             * De accountnaam wordt gebruikt als
+             * Unity Services profile.
+             */
+
+            options.SetProfile(
+                accountName
+            );
 
             if (UnityServices.State ==
                 ServicesInitializationState.Uninitialized)
             {
-                await UnityServices.InitializeAsync(options);
+                await UnityServices.InitializeAsync(
+                    options
+                );
+
                 servicesInitialized = true;
             }
             else
@@ -115,6 +120,10 @@ public class TestLObby : NetworkBehaviour
                     UnityServices.State ==
                     ServicesInitializationState.Initialized;
             }
+
+            /*
+             * Unity Authentication automatisch uitvoeren.
+             */
 
             if (!AuthenticationService.Instance.IsSignedIn)
             {
@@ -131,136 +140,106 @@ public class TestLObby : NetworkBehaviour
             }
 
             Debug.Log(
-                "Authentication successful for: " +
+                "Authentication successful."
+            );
+
+            Debug.Log(
+                "Account: " +
+                accountName
+            );
+
+            Debug.Log(
+                "Multiplayer Name: " +
                 playerName
             );
+
+            /*
+             * Als de NetworkPlayer al bestaat,
+             * proberen we meteen de naam te sturen.
+             */
+
+            ApplyPlayerNameToNetworkPlayer();
 
             HandlePeriodicListLobbies();
         }
         catch (Exception e)
         {
             Debug.LogError(
-                "Authentication failed: " + e
+                "Authentication failed: " +
+                e
             );
         }
     }
 
     // =========================================================
-    // NETWORK HOST
+    // PLAYER NAME
     // =========================================================
 
-    public void StartHost()
+    public void SetPlayerName(
+        string newPlayerName)
     {
+        if (string.IsNullOrWhiteSpace(
+            newPlayerName))
+        {
+            return;
+        }
+
+        newPlayerName =
+            newPlayerName.Trim();
+
+        if (newPlayerName.Length > 20)
+        {
+            newPlayerName =
+                newPlayerName.Substring(
+                    0,
+                    20
+                );
+        }
+
+        playerName =
+            newPlayerName;
+
+        Debug.Log(
+            "Multiplayer name changed to: " +
+            playerName
+        );
+
+        /*
+         * Als je al in een lobby zit,
+         * wordt de naam daar aangepast.
+         */
+
+        UpdatePlayerName(
+            playerName
+        );
+
+        /*
+         * Ook de naam boven de player proberen
+         * te veranderen.
+         */
+
+        ApplyPlayerNameToNetworkPlayer();
+    }
+
+    // =========================================================
+    // PLAYER NAME NAAR NETWORK PLAYER
+    // =========================================================
+
+    private void ApplyPlayerNameToNetworkPlayer()
+    {
+        if (!IsSpawned)
+            return;
+
         if (NetworkManager.Singleton == null)
-        {
-            Debug.LogError(
-                "NetworkManager.Singleton is missing."
-            );
-
-            return;
-        }
-
-        if (NetworkManager.Singleton.IsListening)
-        {
-            Debug.LogWarning(
-                "NetworkManager is already listening."
-            );
-
-            return;
-        }
-
-        NetworkManager.Singleton.OnClientConnectedCallback +=
-            NetworkManager_OnClientConnectedCallback;
-
-        NetworkManager.Singleton.OnClientDisconnectCallback +=
-            NetworkManager_OnClientDisconnectCallback;
-
-        NetworkManager.Singleton.StartHost();
-
-        Debug.Log("Started Host.");
-    }
-
-    private void NetworkManager_OnClientConnectedCallback(
-        ulong clientId)
-    {
-        if (!IsServer)
             return;
 
-        int existingIndex =
-            GetPlayerIndexFromClientId(clientId);
+        if (!NetworkManager.Singleton.IsListening)
+            return;
 
-        if (existingIndex == -1)
-        {
-            playerDataNetworkList.Add(
-                new PlayerData(clientId, "")
-            );
-        }
-
-        Debug.Log(
-            "Client connected: " + clientId
+        SendPlayerNameToServerRpc(
+            playerName
         );
     }
-
-    private void NetworkManager_OnClientDisconnectCallback(
-        ulong clientId)
-    {
-        if (!IsServer)
-            return;
-
-        int index =
-            GetPlayerIndexFromClientId(clientId);
-
-        if (index != -1)
-        {
-            playerDataNetworkList.RemoveAt(index);
-        }
-
-        Debug.Log(
-            "Client disconnected: " + clientId
-        );
-    }
-
-    // =========================================================
-    // PLAYER DATA
-    // =========================================================
-
-    private int GetPlayerIndexFromClientId(
-        ulong clientId)
-    {
-        for (int i = 0;
-             i < playerDataNetworkList.Count;
-             i++)
-        {
-            if (playerDataNetworkList[i].clientId ==
-                clientId)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    public List<PlayerData> GetPlayerDataList()
-    {
-        List<PlayerData> list =
-            new List<PlayerData>();
-
-        for (int i = 0;
-             i < playerDataNetworkList.Count;
-             i++)
-        {
-            list.Add(
-                playerDataNetworkList[i]
-            );
-        }
-
-        return list;
-    }
-
-    // =========================================================
-    // PLAYER NAME NETWORK SYNC
-    // =========================================================
 
     [ServerRpc(RequireOwnership = false)]
     public void SendPlayerNameToServerRpc(
@@ -268,19 +247,20 @@ public class TestLObby : NetworkBehaviour
         ServerRpcParams serverRpcParams = default)
     {
         ulong clientId =
-            serverRpcParams.Receive.SenderClientId;
+            serverRpcParams
+                .Receive
+                .SenderClientId;
 
-        if (string.IsNullOrWhiteSpace(newPlayerName))
+        if (string.IsNullOrWhiteSpace(
+            newPlayerName))
         {
             newPlayerName = "Player";
         }
 
-        // -----------------------------------------
-        // Update PlayerData NetworkList
-        // -----------------------------------------
-
         int playerDataIndex =
-            GetPlayerIndexFromClientId(clientId);
+            GetPlayerIndexFromClientId(
+                clientId
+            );
 
         if (playerDataIndex == -1)
         {
@@ -306,10 +286,6 @@ public class TestLObby : NetworkBehaviour
             ] = playerData;
         }
 
-        // -----------------------------------------
-        // Update actual TestPlayer
-        // -----------------------------------------
-
         SetPlayerNetworkName(
             clientId,
             newPlayerName
@@ -321,6 +297,10 @@ public class TestLObby : NetworkBehaviour
             $"Name: {newPlayerName}"
         );
     }
+
+    // =========================================================
+    // TEST PLAYER NAAM
+    // =========================================================
 
     public void SetPlayerNetworkName(
         ulong clientId,
@@ -354,6 +334,136 @@ public class TestLObby : NetworkBehaviour
     }
 
     // =========================================================
+    // NETWORK HOST
+    // =========================================================
+
+    public void StartHost()
+    {
+        if (NetworkManager.Singleton == null)
+        {
+            Debug.LogError(
+                "NetworkManager.Singleton is missing."
+            );
+
+            return;
+        }
+
+        if (NetworkManager.Singleton.IsListening)
+        {
+            Debug.LogWarning(
+                "NetworkManager is already listening."
+            );
+
+            return;
+        }
+
+        NetworkManager.Singleton
+            .OnClientConnectedCallback +=
+            NetworkManager_OnClientConnectedCallback;
+
+        NetworkManager.Singleton
+            .OnClientDisconnectCallback +=
+            NetworkManager_OnClientDisconnectCallback;
+
+        NetworkManager.Singleton.StartHost();
+
+        Debug.Log(
+            "Started Host."
+        );
+    }
+
+    private void NetworkManager_OnClientConnectedCallback(
+        ulong clientId)
+    {
+        if (!IsServer)
+            return;
+
+        int existingIndex =
+            GetPlayerIndexFromClientId(
+                clientId
+            );
+
+        if (existingIndex == -1)
+        {
+            playerDataNetworkList.Add(
+                new PlayerData(
+                    clientId,
+                    ""
+                )
+            );
+        }
+
+        Debug.Log(
+            "Client connected: " +
+            clientId
+        );
+    }
+
+    private void NetworkManager_OnClientDisconnectCallback(
+        ulong clientId)
+    {
+        if (!IsServer)
+            return;
+
+        int index =
+            GetPlayerIndexFromClientId(
+                clientId
+            );
+
+        if (index != -1)
+        {
+            playerDataNetworkList.RemoveAt(
+                index
+            );
+        }
+
+        Debug.Log(
+            "Client disconnected: " +
+            clientId
+        );
+    }
+
+    private int GetPlayerIndexFromClientId(
+        ulong clientId)
+    {
+        for (
+            int i = 0;
+            i < playerDataNetworkList.Count;
+            i++
+        )
+        {
+            if (
+                playerDataNetworkList[i].clientId ==
+                clientId
+            )
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    public List<PlayerData> GetPlayerDataList()
+    {
+        List<PlayerData> list =
+            new List<PlayerData>();
+
+        for (
+            int i = 0;
+            i < playerDataNetworkList.Count;
+            i++
+        )
+        {
+            list.Add(
+                playerDataNetworkList[i]
+            );
+        }
+
+        return list;
+    }
+
+    // =========================================================
     // LOBBY HEARTBEAT
     // =========================================================
 
@@ -362,7 +472,8 @@ public class TestLObby : NetworkBehaviour
         if (hostLobby == null)
             return;
 
-        heartbeatTimer -= Time.deltaTime;
+        heartbeatTimer -=
+            Time.deltaTime;
 
         if (heartbeatTimer <= 0f)
         {
@@ -378,14 +489,15 @@ public class TestLObby : NetworkBehaviour
             catch (LobbyServiceException e)
             {
                 Debug.LogError(
-                    "Heartbeat failed: " + e
+                    "Heartbeat failed: " +
+                    e
                 );
             }
         }
     }
 
     // =========================================================
-    // LOBBY POLLING
+    // LOBBY UPDATE
     // =========================================================
 
     private async void HandleLobbyPollForUpdate()
@@ -393,7 +505,8 @@ public class TestLObby : NetworkBehaviour
         if (joinedLobby == null)
             return;
 
-        lobbyUpdateTimer -= Time.deltaTime;
+        lobbyUpdateTimer -=
+            Time.deltaTime;
 
         if (lobbyUpdateTimer <= 0f)
         {
@@ -407,8 +520,11 @@ public class TestLObby : NetworkBehaviour
                             joinedLobby.Id
                         );
 
-                if (joinedLobby.Data.ContainsKey(
-                    KEY_START_GAME))
+                if (
+                    joinedLobby.Data.ContainsKey(
+                        KEY_START_GAME
+                    )
+                )
                 {
                     string relayCode =
                         joinedLobby.Data[
@@ -418,7 +534,9 @@ public class TestLObby : NetworkBehaviour
                     if (relayCode != "0")
                     {
                         await testRelayScript
-                            .JoinRelay(relayCode);
+                            .JoinRelay(
+                                relayCode
+                            );
 
                         joinedLobby = null;
                     }
@@ -427,7 +545,8 @@ public class TestLObby : NetworkBehaviour
             catch (LobbyServiceException e)
             {
                 Debug.LogError(
-                    "Lobby update failed: " + e
+                    "Lobby update failed: " +
+                    e
                 );
             }
         }
@@ -445,7 +564,8 @@ public class TestLObby : NetworkBehaviour
         if (!AuthenticationService.Instance.IsSignedIn)
             return;
 
-        listLobbiesTimer -= Time.deltaTime;
+        listLobbiesTimer -=
+            Time.deltaTime;
 
         if (listLobbiesTimer <= 0f)
         {
@@ -470,15 +590,16 @@ public class TestLObby : NetworkBehaviour
             QueryLobbiesOptions queryLobbiesOptions =
                 new QueryLobbiesOptions
                 {
-                    Filters = new List<QueryFilter>
-                    {
-                        new QueryFilter(
-                            QueryFilter.FieldOptions
-                                .AvailableSlots,
-                            "0",
-                            QueryFilter.OpOptions.GT
-                        )
-                    }
+                    Filters =
+                        new List<QueryFilter>
+                        {
+                            new QueryFilter(
+                                QueryFilter.FieldOptions
+                                    .AvailableSlots,
+                                "0",
+                                QueryFilter.OpOptions.GT
+                            )
+                        }
                 };
 
             QueryResponse queryResponse =
@@ -499,7 +620,8 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "List lobbies failed: " + e
+                "List lobbies failed: " +
+                e
             );
         }
         finally
@@ -518,7 +640,8 @@ public class TestLObby : NetworkBehaviour
     {
         try
         {
-            Player player = GetPlayer();
+            Player player =
+                GetPlayer();
 
             CreateLobbyOptions options =
                 new CreateLobbyOptions
@@ -527,12 +650,15 @@ public class TestLObby : NetworkBehaviour
                     IsPrivate = isPrivate,
 
                     Data =
-                        new Dictionary<string, DataObject>
+                        new Dictionary<
+                            string,
+                            DataObject>
                         {
                             {
                                 KEY_START_GAME,
                                 new DataObject(
-                                    DataObject.VisibilityOptions
+                                    DataObject
+                                        .VisibilityOptions
                                         .Member,
                                     "0"
                                 )
@@ -557,19 +683,21 @@ public class TestLObby : NetworkBehaviour
             }
 
             Debug.Log(
-                "Created lobby: " + lobby.Id
+                "Created lobby: " +
+                lobby.Id
             );
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Create lobby failed: " + e
+                "Create lobby failed: " +
+                e
             );
         }
     }
 
     // =========================================================
-    // JOIN LOBBY
+    // JOIN LOBBY BY ID
     // =========================================================
 
     public async void JoinLobbyById(
@@ -593,10 +721,15 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Join lobby by ID failed: " + e
+                "Join lobby by ID failed: " +
+                e
             );
         }
     }
+
+    // =========================================================
+    // JOIN LOBBY BY CODE
+    // =========================================================
 
     public async void JoinLobbyByCode(
         string lobbyCode)
@@ -619,19 +752,26 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Join lobby by code failed: " + e
+                "Join lobby by code failed: " +
+                e
             );
         }
     }
 
-    public async void JoinLobby(Lobby lobby)
+    // =========================================================
+    // JOIN LOBBY
+    // =========================================================
+
+    public async void JoinLobby(
+        Lobby lobby)
     {
         if (lobby == null)
             return;
 
         try
         {
-            Player player = GetPlayer();
+            Player player =
+                GetPlayer();
 
             joinedLobby =
                 await LobbyService.Instance
@@ -651,10 +791,15 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Join lobby failed: " + e
+                "Join lobby failed: " +
+                e
             );
         }
     }
+
+    // =========================================================
+    // QUICK JOIN
+    // =========================================================
 
     public async void QuickJoinLobby()
     {
@@ -665,7 +810,8 @@ public class TestLObby : NetworkBehaviour
                     .QuickJoinLobbyAsync(
                         new QuickJoinLobbyOptions
                         {
-                            Player = GetPlayer()
+                            Player =
+                                GetPlayer()
                         }
                     );
 
@@ -677,13 +823,14 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Quick Join failed: " + e
+                "Quick Join failed: " +
+                e
             );
         }
     }
 
     // =========================================================
-    // PLAYER
+    // GET PLAYER
     // =========================================================
 
     public Player GetPlayer()
@@ -691,14 +838,16 @@ public class TestLObby : NetworkBehaviour
         return new Player
         {
             Data =
-                new Dictionary<string,
+                new Dictionary<
+                    string,
                     PlayerDataObject>
                 {
                     {
                         "PlayerName",
                         new PlayerDataObject(
                             PlayerDataObject
-                                .VisibilityOptions.Member,
+                                .VisibilityOptions
+                                .Member,
                             playerName
                         )
                     }
@@ -706,16 +855,21 @@ public class TestLObby : NetworkBehaviour
         };
     }
 
+    // =========================================================
+    // UPDATE PLAYER NAME
+    // =========================================================
+
     public async void UpdatePlayerName(
         string newPlayerName)
     {
         if (string.IsNullOrWhiteSpace(
             newPlayerName))
         {
-            newPlayerName = "Player";
+            return;
         }
 
-        playerName = newPlayerName;
+        playerName =
+            newPlayerName.Trim();
 
         if (joinedLobby == null)
             return;
@@ -746,11 +900,17 @@ public class TestLObby : NetworkBehaviour
                             }
                     }
                 );
+
+            Debug.Log(
+                "Lobby player name updated: " +
+                playerName
+            );
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Update player name failed: " + e
+                "Update player name failed: " +
+                e
             );
         }
     }
@@ -791,12 +951,14 @@ public class TestLObby : NetworkBehaviour
                         }
                     );
 
-            joinedLobby = hostLobby;
+            joinedLobby =
+                hostLobby;
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Update game mode failed: " + e
+                "Update game mode failed: " +
+                e
             );
         }
     }
@@ -822,9 +984,11 @@ public class TestLObby : NetworkBehaviour
         try
         {
             string relayCode =
-                await testRelayScript.CreateRelay();
+                await testRelayScript
+                    .CreateRelay();
 
-            if (string.IsNullOrEmpty(relayCode))
+            if (string.IsNullOrEmpty(
+                relayCode))
             {
                 Debug.LogError(
                     "Relay code was null."
@@ -857,7 +1021,8 @@ public class TestLObby : NetworkBehaviour
                         }
                     );
 
-            joinedLobby = lobby;
+            joinedLobby =
+                lobby;
 
             if (inLobbyUI != null)
             {
@@ -872,7 +1037,8 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Start game failed: " + e
+                "Start game failed: " +
+                e
             );
         }
     }
@@ -906,7 +1072,8 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Leave lobby failed: " + e
+                "Leave lobby failed: " +
+                e
             );
         }
     }
@@ -934,7 +1101,8 @@ public class TestLObby : NetworkBehaviour
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Kick failed: " + e
+                "Kick failed: " +
+                e
             );
         }
     }
@@ -962,16 +1130,19 @@ public class TestLObby : NetworkBehaviour
                         joinedLobby.Id,
                         new UpdateLobbyOptions
                         {
-                            HostId = newHostId
+                            HostId =
+                                newHostId
                         }
                     );
 
-            joinedLobby = hostLobby;
+            joinedLobby =
+                hostLobby;
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Host migration failed: " + e
+                "Host migration failed: " +
+                e
             );
         }
     }
@@ -1006,12 +1177,15 @@ public class TestLObby : NetworkBehaviour
                 mpUIManager.LobbyUIOnOff();
             }
 
-            Debug.Log("Lobby deleted.");
+            Debug.Log(
+                "Lobby deleted."
+            );
         }
         catch (LobbyServiceException e)
         {
             Debug.LogError(
-                "Delete lobby failed: " + e
+                "Delete lobby failed: " +
+                e
             );
         }
     }
@@ -1026,7 +1200,7 @@ public class TestLObby : NetworkBehaviour
     }
 
     // =========================================================
-    // CLEANUP
+    // DESTROY
     // =========================================================
 
     private void OnDestroy()
