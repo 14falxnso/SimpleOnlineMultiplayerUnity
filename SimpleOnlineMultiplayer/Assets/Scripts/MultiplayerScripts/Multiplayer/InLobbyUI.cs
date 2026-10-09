@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+
 using TMPro;
 using Unity.Services.Lobbies.Models;
 using UnityEngine;
@@ -16,43 +16,31 @@ public class InLobbyUI : MonoBehaviour
     [SerializeField] private Transform playerLobbyContainer;
     [SerializeField] private Transform playerLobbyTemplate;
 
+    private float updateTimer;
+
     private void Start()
     {
         if (playerLobbyTemplate != null)
             playerLobbyTemplate.gameObject.SetActive(false);
 
-        ShowLobbyName();
-        UpdatePlayerList();
+        RefreshUI();
     }
 
     private void Update()
     {
-        if (!gameObject.activeSelf)
+        if (!gameObject.activeInHierarchy)
             return;
 
-        UpdateLobbyData();
-    }
-
-    private float updateTimer;
-
-    private void UpdateLobbyData()
-    {
         updateTimer -= Time.deltaTime;
 
-        if (updateTimer > 0f)
-            return;
-
-        updateTimer = 1f;
-
-        ShowLobbyName();
-        UpdatePlayerList();
+        if (updateTimer <= 0f)
+        {
+            updateTimer = 1f;
+            RefreshUI();
+        }
     }
 
-    // =========================================================
-    // LOBBY INFO
-    // =========================================================
-
-    private void ShowLobbyName()
+    private void RefreshUI()
     {
         if (testLobbyScript == null)
             return;
@@ -62,28 +50,23 @@ public class InLobbyUI : MonoBehaviour
         if (lobby == null)
             return;
 
+        // Lobby-informatie
         if (lobbyNameText != null)
             lobbyNameText.text = lobby.Name;
 
         if (lobbycodeText != null)
-            lobbycodeText.text =
-                "Code: " + lobby.LobbyCode;
+            lobbycodeText.text = "Code: " + lobby.LobbyCode;
+
+        UpdatePlayerList(lobby);
     }
 
-    // =========================================================
-    // PLAYER LIST
-    // =========================================================
-
-    private void UpdatePlayerList()
+    private void UpdatePlayerList(Lobby lobby)
     {
-        if (testLobbyScript == null)
+        if (playerLobbyContainer == null ||
+            playerLobbyTemplate == null)
             return;
 
-        Lobby lobby = testLobbyScript.GetLobby();
-
-        if (lobby == null)
-            return;
-
+        // Verwijder oude spelersrijen.
         foreach (Transform child in playerLobbyContainer)
         {
             if (child == playerLobbyTemplate)
@@ -92,36 +75,47 @@ public class InLobbyUI : MonoBehaviour
             Destroy(child.gameObject);
         }
 
-        foreach (Unity.Services.Lobbies.Models.Player player
-                 in lobby.Players)
+        if (lobby.Players == null)
+            return;
+
+        // Maak een rij voor iedere speler in de actuele lobby.
+        foreach (Player player in lobby.Players)
         {
             string playerName = "Player";
 
             if (player.Data != null &&
-                player.Data.ContainsKey("PlayerName"))
+                player.Data.TryGetValue(
+                    "PlayerName",
+                    out PlayerDataObject nameData) &&
+                !string.IsNullOrWhiteSpace(nameData.Value))
             {
-                playerName =
-                    player.Data["PlayerName"].Value;
+                playerName = nameData.Value;
             }
 
-            Transform playerLobbyTransform =
-                Instantiate(
-                    playerLobbyTemplate,
-                    playerLobbyContainer
-                );
+            Transform row = Instantiate(
+                playerLobbyTemplate,
+                playerLobbyContainer
+            );
 
-            playerLobbyTransform.gameObject.SetActive(true);
+            row.gameObject.SetActive(true);
 
-            PlayerLobbyList playerLobbyList =
-                playerLobbyTransform
-                    .GetComponent<PlayerLobbyList>();
+            PlayerLobbyList playerRow =
+                row.GetComponent<PlayerLobbyList>();
 
-            if (playerLobbyList != null)
+            if (playerRow != null)
             {
-                playerLobbyList.SetPlayerName(
-                    playerName
+                playerRow.SetPlayerName(playerName);
+            }
+            else
+            {
+                Debug.LogWarning(
+                    "PlayerLobbyTemplate mist het PlayerLobbyList-script."
                 );
             }
+
+            Debug.Log(
+                $"Lobby speler: {playerName} | ID: {player.Id}"
+            );
         }
     }
 }

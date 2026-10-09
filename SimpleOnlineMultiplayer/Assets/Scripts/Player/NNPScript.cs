@@ -1,3 +1,4 @@
+
 using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
@@ -8,82 +9,74 @@ public class NNPScript : NetworkBehaviour
     [Header("Movement")]
     public float Speed = 10f;
 
-    private Vector3 Movement;
-    private Rigidbody rb;
-
-    private PlayerInput Controls;
-
     [SerializeField] private Transform cameraPos;
 
+    private Vector3 Movement;
+    private Rigidbody rb;
+    private PlayerInput Controls;
+    private bool localMode;
 
     [Header("Inventory")]
     [SerializeField] private int inventorySize = 3;
 
-    private List<GameObject> inventory = new List<GameObject>();
-
-    // Welk inventory-slot momenteel geselecteerd is
-    // 0 = vak 1
-    // 1 = vak 2
-    // 2 = vak 3
+    private readonly List<GameObject> inventory = new List<GameObject>();
     private int selectedInventorySlot = 0;
-
 
     [Header("Player UI")]
     [SerializeField] private PlayerUI playerUI;
 
-
     [Header("Shoot")]
     [SerializeField] private Transform shootingPoint;
-
-    // Dit is de prefab die daadwerkelijk wordt geschoten
     [SerializeField] private GameObject yeetPrefab;
-
-    [SerializeField] private float yeetSpeed = 10f;
-
 
     private void Awake()
     {
-        // Rigidbody zoeken, ook als deze op een child zit
         rb = GetComponentInChildren<Rigidbody>();
-
-        // Input System aanmaken
         Controls = new PlayerInput();
 
-        // Movement
         Controls.Player.Walk.performed += OnMove;
         Controls.Player.Walk.canceled += OnMove;
-
-        // Inventory
         Controls.Player.Inventory.performed += OnInventory;
-
-
-        // Shoot
         Controls.Player.Shoot.performed += OnShoot;
 
-        // Input aanzetten
-        Controls.Player.Enable();
+        localMode =
+            NetworkManager.Singleton == null ||
+            !NetworkManager.Singleton.IsListening;
+
+        if (localMode)
+            Controls.Player.Enable();
     }
 
-
-    private void OnDestroy()
+    public override void OnNetworkSpawn()
     {
-        if (Controls != null)
+        if (IsOwner)
         {
-            // Movement
-            Controls.Player.Walk.performed -= OnMove;
-            Controls.Player.Walk.canceled -= OnMove;
-
-            // Inventory
-            Controls.Player.Inventory.performed -= OnInventory;
-
-
-            // Shoot
-            Controls.Player.Shoot.performed -= OnShoot;
-
+            Controls.Player.Enable();
+        }
+        else
+        {
             Controls.Player.Disable();
         }
     }
 
+    public override void OnNetworkDespawn()
+    {
+        Controls.Player.Disable();
+    }
+
+    private void OnDestroy()
+    {
+        if (Controls == null)
+            return;
+
+        Controls.Player.Walk.performed -= OnMove;
+        Controls.Player.Walk.canceled -= OnMove;
+        Controls.Player.Inventory.performed -= OnInventory;
+        Controls.Player.Shoot.performed -= OnShoot;
+
+        Controls.Player.Disable();
+        Controls.Dispose();
+    }
 
     // =========================
     // MOVEMENT
@@ -91,105 +84,70 @@ public class NNPScript : NetworkBehaviour
 
     public void OnMove(InputAction.CallbackContext context)
     {
+        if (IsSpawned && !IsOwner)
+            return;
+
         Vector2 input = context.ReadValue<Vector2>();
 
         Movement.x = input.x;
         Movement.z = input.y;
     }
 
-
     private void FixedUpdate()
     {
+        if (IsSpawned && !IsOwner)
+            return;
+
         if (rb == null || cameraPos == null)
             return;
 
-        // Richtingen van de camera pakken
         Vector3 forward = cameraPos.forward;
         Vector3 right = cameraPos.right;
 
-        // Zorgen dat we alleen over de grond bewegen
         forward.y = 0f;
         right.y = 0f;
 
         forward.Normalize();
         right.Normalize();
 
-        // Input omzetten naar camera-relative movement
-        Vector3 movement = (right * Movement.x) + (forward * Movement.z);
+        Vector3 movement =
+            right * Movement.x + forward * Movement.z;
 
-        // Rigidbody bewegen
         rb.MovePosition(
             rb.position + movement * Speed * Time.fixedDeltaTime
         );
     }
 
-
-    // =========================
-    // INVENTORY INPUT
-    // =========================
-
-    // Toets 1
     // =========================
     // INVENTORY INPUT
     // =========================
 
     public void OnInventory(InputAction.CallbackContext context)
     {
+        if (IsSpawned && !IsOwner)
+            return;
+
         if (!context.performed)
             return;
 
-        // Kijken welke binding is gebruikt
         string key = context.control.name;
 
         if (key == "1")
-        {
             SelectInventorySlot(0);
-        }
         else if (key == "2")
-        {
             SelectInventorySlot(1);
-        }
         else if (key == "3")
-        {
             SelectInventorySlot(2);
-        }
     }
-
-
-    // Toets 2
-    public void OnInventory2(InputAction.CallbackContext context)
-    {
-        if (!context.performed)
-            return;
-
-        SelectInventorySlot(1);
-    }
-
-
-    // Toets 3
-    public void OnInventory3(InputAction.CallbackContext context)
-    {
-        if (!context.performed)
-            return;
-
-        SelectInventorySlot(2);
-    }
-
-
-    // =========================
-    // INVENTORY SELECTEREN
-    // =========================
 
     private void SelectInventorySlot(int slot)
     {
-        // Check of het slot bestaat
         if (slot < 0 || slot >= inventory.Count)
         {
             Debug.Log("Dit inventory-slot is leeg!");
             return;
         }
 
-        // Slot opslaan
         selectedInventorySlot = slot;
 
         Debug.Log(
@@ -198,46 +156,33 @@ public class NNPScript : NetworkBehaviour
         );
     }
 
-
     // =========================
     // SHOOT INPUT
     // =========================
 
     public void OnShoot(InputAction.CallbackContext context)
     {
+        if (IsSpawned && !IsOwner)
+            return;
+
         if (!context.performed)
             return;
 
         Shoot();
     }
 
-
-    // =========================
-    // SHOOT
-    // =========================
-
     private void Shoot()
     {
-        // Check of inventory leeg is
         if (inventory.Count == 0)
         {
             Debug.Log("Inventory is leeg!");
             return;
         }
 
-        // Check of geselecteerde slot bestaat
-        if (selectedInventorySlot >= inventory.Count)
+        if (selectedInventorySlot < 0 ||
+            selectedInventorySlot >= inventory.Count)
         {
             Debug.Log("Dit inventory-slot is leeg!");
-            return;
-        }
-
-        // Pak het geselecteerde item
-        GameObject itemToShoot = inventory[selectedInventorySlot];
-
-        if (itemToShoot == null)
-        {
-            Debug.LogWarning("Item in inventory is null!");
             return;
         }
 
@@ -247,37 +192,78 @@ public class NNPScript : NetworkBehaviour
             return;
         }
 
-        Debug.Log(
-            $"Ik schiet {itemToShoot.name} vanuit slot {selectedInventorySlot + 1}"
-        );
+        if (yeetPrefab == null)
+        {
+            Debug.LogWarning("Yeet Prefab is niet ingesteld!");
+            return;
+        }
 
-        // Item spawnen
-        Instantiate(
-            itemToShoot,
-            shootingPoint.position,
-            shootingPoint.rotation
-        );
+        GameObject itemToShoot = inventory[selectedInventorySlot];
 
-        // Item uit inventory verwijderen
+        if (itemToShoot == null)
+        {
+            Debug.LogWarning("Item in inventory is null!");
+            return;
+        }
+
+        if (IsSpawned)
+        {
+            ShootServerRpc(
+                shootingPoint.position,
+                shootingPoint.rotation
+            );
+        }
+        else
+        {
+            Instantiate(
+                yeetPrefab,
+                shootingPoint.position,
+                shootingPoint.rotation
+            );
+        }
+
+        Debug.Log($"Ik schiet een item vanuit slot {selectedInventorySlot + 1}");
+
         inventory.RemoveAt(selectedInventorySlot);
 
-        // Nieuw geselecteerd slot bepalen
         if (inventory.Count == 0)
-        {
             selectedInventorySlot = 0;
-        }
         else if (selectedInventorySlot >= inventory.Count)
-        {
             selectedInventorySlot = inventory.Count - 1;
-        }
 
-        // UI updaten
-        if (playerUI != null)
-        {
-            playerUI.UpdateInventoryUI(inventory);
-        }
+        UpdateInventoryUI();
     }
 
+    [ServerRpc]
+    private void ShootServerRpc(
+        Vector3 position,
+        Quaternion rotation)
+    {
+        if (yeetPrefab == null)
+            return;
+
+        GameObject projectile = Instantiate(
+            yeetPrefab,
+            position,
+            rotation
+        );
+
+        NetworkObject networkObject =
+            projectile.GetComponent<NetworkObject>();
+
+        if (networkObject == null)
+        {
+            Debug.LogError(
+                "Yeet Prefab heeft geen NetworkObject!"
+            );
+
+            Destroy(projectile);
+            return;
+        }
+
+        // De eigenaar blijft herkenbaar als aanvaller.
+        networkObject.SpawnWithOwnership(OwnerClientId);
+    }
 
     // =========================
     // INVENTORY
@@ -291,14 +277,12 @@ public class NNPScript : NetworkBehaviour
             return false;
         }
 
-        // Check of inventory vol zit
         if (inventory.Count >= inventorySize)
         {
             Debug.Log("Inventory is full!");
             return false;
         }
 
-        // Item toevoegen
         inventory.Add(itemPrefab);
 
         Debug.Log(
@@ -306,32 +290,14 @@ public class NNPScript : NetworkBehaviour
             $"Inventory: {inventory.Count}/{inventorySize}"
         );
 
-        // UI updaten
-        if (playerUI != null)
-        {
-            playerUI.UpdateInventoryUI(inventory);
-        }
-        else
-        {
-            Debug.LogWarning(
-                "PlayerUI is niet gekoppeld aan " +
-                gameObject.name
-            );
-        }
-
+        UpdateInventoryUI();
         return true;
     }
-
-
-    // =========================
-    // INVENTORY CHECKS
-    // =========================
 
     public bool HasItem(GameObject itemPrefab)
     {
         return inventory.Contains(itemPrefab);
     }
-
 
     public int GetItemAmount(GameObject itemPrefab)
     {
@@ -340,14 +306,11 @@ public class NNPScript : NetworkBehaviour
         foreach (GameObject item in inventory)
         {
             if (item == itemPrefab)
-            {
                 amount++;
-            }
         }
 
         return amount;
     }
-
 
     public bool RemoveItem(GameObject itemPrefab)
     {
@@ -356,23 +319,20 @@ public class NNPScript : NetworkBehaviour
 
         inventory.Remove(itemPrefab);
 
-        Debug.Log(
-            $"{itemPrefab.name} verwijderd uit inventory."
-        );
+        Debug.Log($"{itemPrefab.name} verwijderd uit inventory.");
 
-        // UI opnieuw updaten
-        if (playerUI != null)
-        {
-            playerUI.UpdateInventoryUI(inventory);
-        }
+        if (selectedInventorySlot >= inventory.Count)
+            selectedInventorySlot = Mathf.Max(0, inventory.Count - 1);
 
+        UpdateInventoryUI();
         return true;
     }
 
-
-    // =========================
-    // INVENTORY DEBUG
-    // =========================
+    private void UpdateInventoryUI()
+    {
+        if (playerUI != null)
+            playerUI.UpdateInventoryUI(inventory);
+    }
 
     [ContextMenu("Show Inventory")]
     private void ShowInventory()
@@ -387,13 +347,9 @@ public class NNPScript : NetworkBehaviour
 
         for (int i = 0; i < inventory.Count; i++)
         {
-            Debug.Log(
-                $"Slot {i + 1}: {inventory[i].name}"
-            );
+            Debug.Log($"Slot {i + 1}: {inventory[i].name}");
         }
 
-        Debug.Log(
-            $"Geselecteerd slot: {selectedInventorySlot + 1}"
-        );
+        Debug.Log($"Geselecteerd slot: {selectedInventorySlot + 1}");
     }
 }

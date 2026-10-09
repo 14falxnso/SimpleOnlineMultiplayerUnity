@@ -1,0 +1,52 @@
+{
+    "accounts": [
+        {
+            "username": "fakka",
+            "password": "Michael",
+            "stats": {
+                "thrownObjects": 0,
+                "wins": 0,
+                "playedGames": 0,
+                "lastPlayedGameResult": 0.0,
+                "playtime": 0.0,
+                "lastUsedName": "fakka"
+            }
+        },
+        {
+            "username": "goedemorgen",
+            "password": "Wacht123",
+            "stats": {
+                "thrownObjects": 0,
+                "wins": 0,
+                "playedGames": 0,
+                "lastPlayedGameResult": 0.0,
+                "playtime": 0.0,
+                "lastUsedName": "zachtebalzak"
+            }
+        },
+        {
+            "username": "watzegke",
+            "password": "koek",
+            "stats": {
+                "thrownObjects": 0,
+                "wins": 0,
+                "playedGames": 0,
+                "lastPlayedGameResult": 0.0,
+                "playtime": 0.0,
+                "lastUsedName": "watzegke"
+            }
+        },
+        {
+            "username": "yotot",
+            "password": "watet",
+            "stats": {
+                "thrownObjects": 0,
+                "wins": 0,
+                "playedGames": 0,
+                "lastPlayedGameResult": 0.0,
+                "playtime": 0.0,
+                "lastUsedName": "yotot"
+            }
+        }
+    ]
+}

@@ -1,3 +1,4 @@
+
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -7,28 +8,25 @@ public class PlayerHealth : NetworkBehaviour
 {
     [Header("Health")]
     [SerializeField] private float maxHealth = 100f;
-
-    public NetworkVariable<float> Health =
-        new NetworkVariable<float>();
-
     [SerializeField] private Image Healthbar;
-    [SerializeField] private ParticleSystem PlayerHitEffect;
 
-    public DamageTypes lastDamageType =
-        DamageTypes.General;
+    public NetworkVariable<float> Health = new NetworkVariable<float>(
+        100f,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server
+    );
 
-    [Header("Multiplayer Round System")]
+    public float health => isNetworked ? Health.Value : localHealth;
+
+    [Header("Multiplayer")]
     [SerializeField] private TestLObby testLobby;
     [SerializeField] private MPRoundSystem mpRoundSystem;
 
+    private MultiplayerGame multiplayerGame;
+
     private bool isNetworked;
-
+    private bool deathRegistered;
     private float localHealth;
-
-    public float health =>
-        isNetworked
-            ? Health.Value
-            : localHealth;
 
     private void Awake()
     {
@@ -39,7 +37,7 @@ public class PlayerHealth : NetworkBehaviour
         if (!isNetworked)
         {
             localHealth = maxHealth;
-            UpdateUI();
+            UpdateUI(localHealth);
         }
     }
 
@@ -48,29 +46,23 @@ public class PlayerHealth : NetworkBehaviour
         isNetworked = true;
 
         if (testLobby == null)
-            testLobby =
-                FindAnyObjectByType<TestLObby>();
+            testLobby = FindAnyObjectByType<TestLObby>();
 
         if (mpRoundSystem == null)
-            mpRoundSystem =
-                FindAnyObjectByType<MPRoundSystem>();
+            mpRoundSystem = FindAnyObjectByType<MPRoundSystem>();
+
+        multiplayerGame = FindAnyObjectByType<MultiplayerGame>();
 
         if (IsServer)
         {
             Health.Value = maxHealth;
+            deathRegistered = false;
         }
 
         Health.OnValueChanged += OnHealthChanged;
 
-        if (IsOwner)
-        {
-            string myName =
-                testLobby != null
-                    ? testLobby.playerName
-                    : "Speler";
-
-            SendPlayerIdServerRpc(myName);
-        }
+        if (IsOwner && testLobby != null)
+            SendPlayerIdServerRpc(testLobby.playerName);
 
         UpdateUI(Health.Value);
     }
@@ -90,9 +82,7 @@ public class PlayerHealth : NetworkBehaviour
         SceneManager.sceneLoaded -= OnSceneLoaded;
     }
 
-    private void OnSceneLoaded(
-        Scene scene,
-        LoadSceneMode mode)
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         ResetHealth();
     }
@@ -102,115 +92,129 @@ public class PlayerHealth : NetworkBehaviour
         if (!isNetworked)
         {
             localHealth = maxHealth;
-            UpdateUI();
+            deathRegistered = false;
+            UpdateUI(localHealth);
             return;
         }
 
         if (IsServer)
         {
             Health.Value = maxHealth;
-            lastDamageType = DamageTypes.General;
+            deathRegistered = false;
         }
     }
 
     public void DisableUI()
     {
-        if (Healthbar != null &&
-            Healthbar.transform.parent != null)
-        {
+        if (Healthbar != null && Healthbar.transform.parent != null)
             Healthbar.transform.parent.gameObject.SetActive(false);
-        }
     }
 
-    private void OnHealthChanged(
-        float oldValue,
-        float newValue)
+    private void OnHealthChanged(float oldValue, float newValue)
     {
-        if (!IsOwner)
-            return;
-
-        UpdateUI(newValue);
+        if (IsOwner)
+            UpdateUI(newValue);
     }
 
-    private void UpdateUI(
-        float value = -1f)
+    private void UpdateUI(float value)
     {
         if (Healthbar == null)
             return;
 
-        float hp =
-            value < 0f
-                ? localHealth
-                : value;
+        float hp = Mathf.Clamp(value, 0f, maxHealth);
 
-        Healthbar.fillAmount =
-            Mathf.Clamp01(hp / maxHealth);
-
-        Healthbar.color =
-            hp <= 40f
-                ? Color.red
-                : Color.green;
+        Healthbar.fillAmount = maxHealth > 0f ? hp / maxHealth : 0f;
+        Healthbar.color = hp <= 40f ? Color.red : Color.green;
     }
 
-    public void Damage(
-        float amount,
-        DamageTypes type = DamageTypes.General)
+    // Damage zonder aanvaller, bijvoorbeeld omgevingsdamage.
+    public void Damage(float amount)
+    {
+        Damage(amount, ulong.MaxValue);
+    }
+
+    // Damage met de ClientId van de aanvaller.
+    public void Damage(float amount, ulong attackerClientId)
     {
         if (amount <= 0f)
             return;
 
         if (!isNetworked)
         {
-            ApplyLocalDamage(amount, type);
+            ApplyLocalDamage(amount);
             return;
         }
 
         if (IsServer)
         {
-            ApplyDamage(amount, type);
+            ApplyDamage(amount, attackerClientId);
         }
         else
         {
-            TakeDamageServerRpc(amount, type);
+            // De server gebruikt de afzender van de RPC
+            // niet automatisch als aanvaller van deze damage.
+            TakeDamageServerRpc(amount);
         }
     }
 
-    private void ApplyLocalDamage(
-        float amount,
-        DamageTypes type)
+    private void ApplyLocalDamage(float amount)
     {
-        localHealth -= amount;
-        localHealth = Mathf.Max(0f, localHealth);
+        if (localHealth <= 0f)
+            return;
 
-        lastDamageType = type;
+        localHealth = Mathf.Max(0f, localHealth - amount);
+        UpdateUI(localHealth);
 
-        UpdateUI();
+        if (localHealth <= 0f)
+            Debug.Log("Speler is dood.");
     }
 
-    private void ApplyDamage(
-        float amount,
-        DamageTypes type)
+    private void ApplyDamage(float amount, ulong attackerClientId)
+    {
+        if (!IsServer || Health.Value <= 0f)
+            return;
+
+        Health.Value = Mathf.Max(0f, Health.Value - amount);
+
+        Debug.Log(
+            $"Speler {OwnerClientId}: {Health.Value}/{maxHealth} HP"
+        );
+
+        if (Health.Value <= 0f && !deathRegistered)
+        {
+            deathRegistered = true;
+            RegisterDeath(attackerClientId);
+        }
+    }
+
+    private void RegisterDeath(ulong attackerClientId)
     {
         if (!IsServer)
             return;
 
-        Health.Value -= amount;
-        Health.Value = Mathf.Max(0f, Health.Value);
+        Debug.Log($"Speler {OwnerClientId} is dood.");
 
-        lastDamageType = type;
+        if (multiplayerGame == null)
+            multiplayerGame = FindAnyObjectByType<MultiplayerGame>();
 
-        if (PlayerHitEffect != null)
+        if (multiplayerGame == null)
+            return;
+
+        multiplayerGame.AddDeath(OwnerClientId);
+
+        if (attackerClientId != ulong.MaxValue &&
+            attackerClientId != OwnerClientId)
         {
-            PlayerHitEffect.Play();
+            multiplayerGame.AddKill(attackerClientId);
         }
     }
 
     [ServerRpc]
-    private void TakeDamageServerRpc(
-        float amount,
-        DamageTypes type)
+    private void TakeDamageServerRpc(float amount)
     {
-        ApplyDamage(amount, type);
+        // Client aangevraagde damage heeft hier geen
+        // geverifieerde aanvaller-ID.
+        ApplyDamage(amount, ulong.MaxValue);
     }
 
     [ServerRpc]
@@ -218,25 +222,9 @@ public class PlayerHealth : NetworkBehaviour
         string playerName,
         ServerRpcParams rpcParams = default)
     {
-        ulong clientId =
-            rpcParams.Receive.SenderClientId;
+        ulong clientId = rpcParams.Receive.SenderClientId;
 
         if (mpRoundSystem != null)
-        {
-            mpRoundSystem.RegisterPlayerName(
-                clientId,
-                playerName
-            );
-        }
+            mpRoundSystem.RegisterPlayerName(clientId, playerName);
     }
-}
-
-public enum DamageTypes
-{
-    Melee,
-    Ranged,
-    Fire,
-    Freeze,
-    Fall,
-    General
 }

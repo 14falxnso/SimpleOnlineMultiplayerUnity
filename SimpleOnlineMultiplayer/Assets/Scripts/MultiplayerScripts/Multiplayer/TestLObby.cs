@@ -700,18 +700,21 @@ public class TestLObby : NetworkBehaviour
     // JOIN LOBBY BY ID
     // =========================================================
 
-    public async void JoinLobbyById(
-        string lobbyId)
+public async void JoinLobbyById(string lobbyId)
     {
         try
         {
-            Lobby lobby =
-                await LobbyService.Instance
-                    .JoinLobbyByIdAsync(
-                        lobbyId
-                    );
+            Player player = GetPlayer();
 
-            joinedLobby = lobby;
+            joinedLobby = await LobbyService.Instance.JoinLobbyByIdAsync(
+                lobbyId,
+                new JoinLobbyByIdOptions
+                {
+                    Player = player
+                }
+            );
+
+            Debug.Log("Joined lobby as: " + playerName);
 
             if (mpUIManager != null)
             {
@@ -720,29 +723,30 @@ public class TestLObby : NetworkBehaviour
         }
         catch (LobbyServiceException e)
         {
-            Debug.LogError(
-                "Join lobby by ID failed: " +
-                e
-            );
+            Debug.LogError("Join lobby by ID failed: " + e);
         }
     }
+
 
     // =========================================================
     // JOIN LOBBY BY CODE
     // =========================================================
 
-    public async void JoinLobbyByCode(
-        string lobbyCode)
+public async void JoinLobbyByCode(string lobbyCode)
     {
         try
         {
-            Lobby lobby =
-                await LobbyService.Instance
-                    .JoinLobbyByCodeAsync(
-                        lobbyCode
-                    );
+            Player player = GetPlayer();
 
-            joinedLobby = lobby;
+            joinedLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(
+                lobbyCode,
+                new JoinLobbyByCodeOptions
+                {
+                    Player = player
+                }
+            );
+
+            Debug.Log("Joined lobby as: " + playerName);
 
             if (mpUIManager != null)
             {
@@ -751,12 +755,10 @@ public class TestLObby : NetworkBehaviour
         }
         catch (LobbyServiceException e)
         {
-            Debug.LogError(
-                "Join lobby by code failed: " +
-                e
-            );
+            Debug.LogError("Join lobby by code failed: " + e);
         }
     }
+
 
     // =========================================================
     // JOIN LOBBY
@@ -835,23 +837,25 @@ public class TestLObby : NetworkBehaviour
 
     public Player GetPlayer()
     {
+        string nameToSend = playerName;
+
+        if (string.IsNullOrWhiteSpace(nameToSend))
+        {
+            nameToSend = "Player";
+        }
+
         return new Player
         {
-            Data =
-                new Dictionary<
-                    string,
-                    PlayerDataObject>
-                {
-                    {
-                        "PlayerName",
-                        new PlayerDataObject(
-                            PlayerDataObject
-                                .VisibilityOptions
-                                .Member,
-                            playerName
-                        )
-                    }
-                }
+            Data = new Dictionary<string, PlayerDataObject>
+        {
+            {
+                "PlayerName",
+                new PlayerDataObject(
+                    PlayerDataObject.VisibilityOptions.Member,
+                    nameToSend
+                )
+            }
+        }
         };
     }
 
