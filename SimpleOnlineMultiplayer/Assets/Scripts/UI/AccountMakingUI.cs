@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -36,6 +37,11 @@ public class AccountMakingUI : MonoBehaviour
     [Header("Multiplayer")]
     [SerializeField] private TestLObby testLobby;
 
+    [Header("Dropdown -> Accounts")]
+    [SerializeField] private TMP_Dropdown loggedInAccountDropdown;
+    [SerializeField] private Button quickLoginButton;
+
+
     private void Start()
     {
         createAccountButton.onClick.AddListener(
@@ -71,6 +77,25 @@ public class AccountMakingUI : MonoBehaviour
         startScreenPanel.SetActive(false);
         statsScreenPanel.SetActive(false);
         maingamePanel.SetActive(false);
+
+
+
+        if (loggedInAccountDropdown != null)
+        {
+            loggedInAccountDropdown.onValueChanged.AddListener(
+                SelectAccountFromDropdown
+            );
+        }
+
+        if (quickLoginButton != null)
+        {
+            quickLoginButton.onClick.AddListener(
+                QuickLogin
+            );
+        }
+
+        RefreshAccountDropdown();
+
     }
 
     // =========================================================
@@ -176,8 +201,69 @@ public class AccountMakingUI : MonoBehaviour
             return;
         }
 
+
+
         LoginSuccessful();
     }
+
+
+    private void RefreshAccountDropdown()
+    {
+        if (loggedInAccountDropdown == null ||
+            AccountManager.Instance == null)
+            return;
+
+        List<string> accountNames =
+            AccountManager.Instance.GetAccountNames();
+
+        loggedInAccountDropdown.ClearOptions();
+        loggedInAccountDropdown.AddOptions(accountNames);
+
+        if (accountNames.Count > 0)
+        {
+            loggedInAccountDropdown.SetValueWithoutNotify(0);
+            SelectAccountFromDropdown(0);
+        }
+    }
+
+    private void SelectAccountFromDropdown(int index)
+    {
+        if (loggedInAccountDropdown == null ||
+            accountName == null)
+            return;
+
+        if (index < 0 ||
+            index >= loggedInAccountDropdown.options.Count)
+            return;
+
+        accountName.text =
+            loggedInAccountDropdown.options[index].text;
+    }
+
+    private void QuickLogin()
+    {
+        if (loggedInAccountDropdown == null ||
+            loggedInAccountDropdown.options.Count == 0)
+        {
+            ShowMessage("Maak eerst een account aan.");
+            return;
+        }
+
+        string username =
+            loggedInAccountDropdown.options[
+                loggedInAccountDropdown.value
+            ].text;
+
+        if (!AccountManager.Instance.QuickLogin(username))
+        {
+            ShowMessage("Dit account bestaat niet meer.");
+            RefreshAccountDropdown();
+            return;
+        }
+
+        LoginSuccessful();
+    }
+
 
     // =========================================================
     // LOGIN GELUKT

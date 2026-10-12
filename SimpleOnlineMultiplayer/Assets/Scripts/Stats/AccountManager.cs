@@ -1,3 +1,5 @@
+
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
@@ -22,15 +24,16 @@ public class AccountManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
 
-        // Sla het bestand op in de hoofdmap van je Unity-project.
-        string projectFolder = Directory.GetParent(Application.dataPath).FullName;
-        string saveFolder = Path.Combine(projectFolder, "SavedData");
+        string projectFolder =
+            Directory.GetParent(Application.dataPath).FullName;
+
+        string saveFolder =
+            Path.Combine(projectFolder, "SavedData");
 
         Directory.CreateDirectory(saveFolder);
 
         filePath = Path.Combine(saveFolder, "accounts.json");
 
-        // Neem eventueel je bestaande JSON-bestand mee.
         string oldFilePath = Path.Combine(
             Application.persistentDataPath,
             "accounts.json"
@@ -39,10 +42,7 @@ public class AccountManager : MonoBehaviour
         if (!File.Exists(filePath) && File.Exists(oldFilePath))
         {
             File.Copy(oldFilePath, filePath);
-            Debug.Log("Bestaande accounts.json gekopieerd.");
         }
-
-        Debug.Log("Accounts JSON locatie: " + filePath);
 
         LoadAccounts();
     }
@@ -63,19 +63,29 @@ public class AccountManager : MonoBehaviour
             database = new AccountDatabase();
 
         if (database.accounts == null)
-            database.accounts = new System.Collections.Generic.List<PlayerAccount>();
-
-        Debug.Log("Accounts geladen.");
+            database.accounts = new List<PlayerAccount>();
     }
 
     private void SaveAccounts()
     {
         string json = JsonUtility.ToJson(database, true);
         File.WriteAllText(filePath, json);
-
-        Debug.Log("Accounts opgeslagen: " + filePath);
     }
 
+    // Alle accountnamen ophalen voor de dropdown.
+    public List<string> GetAccountNames()
+    {
+        List<string> names = new List<string>();
+
+        foreach (PlayerAccount account in database.accounts)
+        {
+            names.Add(account.username);
+        }
+
+        return names;
+    }
+
+    // Normaal account aanmaken.
     public bool Register(string username, string password)
     {
         if (string.IsNullOrWhiteSpace(username) ||
@@ -88,7 +98,8 @@ public class AccountManager : MonoBehaviour
                 return false;
         }
 
-        PlayerAccount newAccount = new PlayerAccount(username, password);
+        PlayerAccount newAccount =
+            new PlayerAccount(username, password);
 
         database.accounts.Add(newAccount);
         SaveAccounts();
@@ -97,12 +108,32 @@ public class AccountManager : MonoBehaviour
         return true;
     }
 
+    // Normaal inloggen met wachtwoord.
     public bool Login(string username, string password)
     {
         foreach (PlayerAccount account in database.accounts)
         {
             if (account.username == username &&
                 account.password == password)
+            {
+                currentAccount = account;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Snel inloggen op een lokaal opgeslagen account.
+    // Let op: deze functie slaat de wachtwoordcontrole over.
+    public bool QuickLogin(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return false;
+
+        foreach (PlayerAccount account in database.accounts)
+        {
+            if (account.username == username)
             {
                 currentAccount = account;
                 return true;

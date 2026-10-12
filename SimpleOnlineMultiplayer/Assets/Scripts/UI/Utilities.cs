@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using UnityEngine;
 
 public class Utilities : MonoBehaviour
@@ -8,5 +9,16 @@ public class Utilities : MonoBehaviour
     public void GoToMainMenu()
     {
        mainMenuPanel.SetActive(true); 
+    }
+
+    public void GoToStartScreen()
+    {
+        mainMenuPanel.SetActive(false);
+        startScreenObject.SetActive(true);
+    }
+
+    public void QuitGame()
+    {
+        Application.Quit();
     }
 }
